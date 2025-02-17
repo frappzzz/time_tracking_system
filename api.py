@@ -36,6 +36,18 @@ async def generate_auth_key(api_key: str = Depends(get_api_key),conn: asyncpg.Co
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
+@app.get("/check_auth_key/{auth_key}")
+async def check_auth_key(auth_key: str,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+    print(auth_key)
+    try:
+        res=await conn.fetchrow("SELECT auth_key FROM auth_keys WHERE auth_key=$1",auth_key)
+        if res:
+            return dict(res)
+        else:
+            raise HTTPException(status_code=404, detail="Key not found")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
 @app.get("/check_id_user_tg/{id_user_tg}")
 async def check_id_user_tg(id_user_tg: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     print(id_user_tg)
