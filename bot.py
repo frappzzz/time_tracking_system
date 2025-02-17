@@ -21,16 +21,8 @@ url = "http://127.0.0.1:5000"
 headers = {config.FASTAPI_KEY_NAME: config.FASTAPI_TOKEN}
 class States(StatesGroup):
     auth = State()
-    confirm_auth=State()
     mainmenu=State()
-    selectorcreate=State()
-    create1=State()
-    create2=State()
-    create3=State()
-    selectproject=State()
-    workinprojectlead=State()
-    workinprojectnotlead=State()
-    setreminder=State()
+
 @Disp.message(StateFilter(None), Command('start'))
 async def starting(sms, state: FSMContext):
     try:
@@ -50,14 +42,11 @@ async def starting(sms, state: FSMContext):
 @Disp.message(StateFilter(None), Command('auth'))
 async def auth_with_code(sms: types.Message, state: FSMContext):
     try:
-        # Извлекаем код из сообщения
-        code = sms.text.split()[1]  # /code 123123 -> 123123
+        code = sms.text.split()[1]  # /auth 123123 -> 123123
         print(code)
         check_code=requests.get(f"{url}/check_auth_key/{code}",
                      headers=headers)
-        # Проверяем код (например, сравниваем с кодом из конфигурации)
-        if check_code.status_code==200:  # Замените на вашу логику проверки кода
-            # Если код верный, авторизуем пользователя
+        if check_code.status_code==200:
             auth_user=requests.post(f"{url}/auth_user/?auth_key={code}&id_user_tg={sms.from_user.id}",
                                       headers=headers)
             if auth_user.status_code==200:
@@ -66,11 +55,9 @@ async def auth_with_code(sms: types.Message, state: FSMContext):
             else:
                 await bot.send_message(sms.from_user.id, "Произошла ошибка авторизации. Попробуйте снова.")
         else:
-            # Если код неверный, сообщаем об ошибке
             await bot.send_message(sms.from_user.id, "Неверный код. Попробуйте снова.")
 
     except IndexError:
-        # Если код не был передан
         await bot.send_message(sms.from_user.id, "Используйте команду в формате: /auth {code}.")
     except Exception as e:
         await bot.send_message(sms.from_user.id, "Произошла ошибка. Попробуйте позже.")
