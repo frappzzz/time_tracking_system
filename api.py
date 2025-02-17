@@ -24,6 +24,17 @@ async def get_db():
     async with pool.acquire() as connection:
         yield connection
 # Пример маршрута с использованием пула соединений
+@app.get("/check_id_user_tg/{id_user_tg}")
+async def check_id_user_tg(id_user_tg: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+    print(id_user_tg)
+    try:
+        res=await conn.fetchrow("SELECT id_user_tg FROM users WHERE id_user_tg=$1",id_user_tg)
+        if res:
+            return dict(res)
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/items")
 async def read_items(api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     try:
