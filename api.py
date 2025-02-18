@@ -1,14 +1,25 @@
 from fastapi import FastAPI, HTTPException,Depends,Header, status
 from fastapi.security import APIKeyHeader
+from fastapi.responses import JSONResponse
 import uvicorn
 import asyncpg, asyncio
 import config
 import string, random
-from typing import Annotated
+from pydantic import BaseModel
+from typing import Annotated, Union
 import json
 app = FastAPI()
 API_KEY_NAME = config.FASTAPI_KEY_NAME
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+
+
+class JsonAddCategory(BaseModel):
+    id_user: int
+    name_category: str
+
+
+
 def generate_code():
     letter = random.choice(string.ascii_uppercase)  # Генерируем случайную букву (заглавную)
     digits = ''.join(random.choices(string.digits, k=5))  # Генерируем 5 случайных цифр
@@ -21,12 +32,18 @@ def get_api_key(api_key: str = Depends(api_key_header)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or missing API Key",
         )
+
+
+
 async def create_db_pool():
     return await asyncpg.create_pool(config.DB_URL)
 async def get_db():
     pool = await create_db_pool()
     async with pool.acquire() as connection:
         yield connection
+
+
+
 @app.get("/generate_auth_key")
 async def generate_auth_key(api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     auth_key=generate_code()
@@ -49,7 +66,7 @@ async def check_auth_key(auth_key: str,api_key: str = Depends(get_api_key),conn:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @app.post("/auth_user/")
-async def check_auth_key(auth_key: str,id_user_tg: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+async def auth_user(auth_key: str,id_user_tg: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     print(auth_key)
     print(id_user_tg)
     try:
@@ -58,6 +75,34 @@ async def check_auth_key(auth_key: str,id_user_tg: int,api_key: str = Depends(ge
             raise HTTPException(status_code=404, detail="Key not found")
         await conn.execute("UPDATE auth_keys SET id_user_tg=$1 WHERE auth_key=$2", id_user_tg,auth_key)
         await conn.execute("INSERT INTO users (id_user_tg, name_user) VALUES ($1,$2)",id_user_tg,"anonymous")
+        return JSONResponse(
+            status_code=200,
+            content={"message": "Category added successfully"}
+        )
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@app.get("/get_categories_by_id_user/{id_user}")
+async def get_categories_by_id_user(id_user: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+    print(id_user)
+    try:
+        res=await conn.fetch("SELECT * FROM categories WHERE id_user=$1",id_user)
+        if res:
+            return res
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+@app.post("/add_category/")
+async def add_category(body: JsonAddCategory,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+    print(body.id_user)
+    print(body.name_category)
+    try:
+        await conn.execute("INSERT INTO categories (id_user, name_category) VALUES ($1,$2)",body.id_user,body.name_category)
+        return JSONResponse(
+            status_code=200,
+            content={"message": "Category added successfully"}
+        )
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
