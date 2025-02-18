@@ -14,7 +14,7 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 
 
-class JsonAddCategory(BaseModel):
+class JsonCategory(BaseModel):
     id_user: int
     name_category: str
 
@@ -77,7 +77,7 @@ async def auth_user(auth_key: str,id_user_tg: int,api_key: str = Depends(get_api
         await conn.execute("INSERT INTO users (id_user_tg, name_user) VALUES ($1,$2)",id_user_tg,"anonymous")
         return JSONResponse(
             status_code=200,
-            content={"message": "Category added successfully"}
+            content={"message": "User authorized successfully"}
         )
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
@@ -93,8 +93,24 @@ async def get_categories_by_id_user(id_user: int,api_key: str = Depends(get_api_
             raise HTTPException(status_code=404, detail="User not found")
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+@app.get("/check_category/")
+async def get_categories_by_id_user(body: JsonCategory,conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        res=await conn.fetch("SELECT * FROM categories WHERE id_user=$1 AND name_category=$2",body.id_user,body.name_category)
+        if res:
+            return JSONResponse(
+                status_code=200,
+                content={"exists": True}
+            )
+        else:
+            return JSONResponse(
+                status_code=200,
+                content={"exists": False}
+            )
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.post("/add_category/")
-async def add_category(body: JsonAddCategory,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+async def add_category(body: JsonCategory,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     print(body.id_user)
     print(body.name_category)
     try:
