@@ -17,6 +17,9 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 class JsonCategory(BaseModel):
     id_user: int
     name_category: str
+class JsonStartTask(BaseModel):
+    id_user: int
+    name_category: str
 
 
 
@@ -36,7 +39,7 @@ def get_api_key(api_key: str = Depends(api_key_header)):
 
 
 async def create_db_pool():
-    return await asyncpg.create_pool(config.DB_URL)
+    return await asyncpg.create_pool(config.DB_URL,max_inactive_connection_lifetime=3)
 async def get_db():
     pool = await create_db_pool()
     async with pool.acquire() as connection:
@@ -87,6 +90,21 @@ async def auth_user(auth_key: str,id_user_tg: int,api_key: str = Depends(get_api
         return JSONResponse(
             status_code=200,
             content={"message": "User authorized successfully"}
+        )
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+@app.post("/start_task/")
+async def start_task(body: JsonStartTask, api_key: str = Depends(get_api_key), conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        res=await conn.fetchrow("SELECT id_category FROM categories WHERE id_user=$1 AND LOWER(name_category)=$2",body.id_user,body.name_category.lower())
+        # Добавляем задачу в базу данных
+        await conn.execute(
+             "INSERT INTO tasks (id_user, id_category, start_time) VALUES ($1, $2, NOW())",
+             body.id_user, res[0]
+         )
+        return JSONResponse(
+            status_code=200,
+            content={"message": "Task started successfully"}
         )
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
