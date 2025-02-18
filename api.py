@@ -64,7 +64,16 @@ async def check_auth_key(auth_key: str,api_key: str = Depends(get_api_key),conn:
             raise HTTPException(status_code=404, detail="Key not found")
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
+@app.get("/get_id_user_by_id_user_tg/{id_user_tg}")
+async def get_id_user_by_id_user_tg(id_user_tg: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        res=await conn.fetchrow("SELECT id_user FROM users WHERE id_user_tg=$1",id_user_tg)
+        if res:
+            return res
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.post("/auth_user/")
 async def auth_user(auth_key: str,id_user_tg: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     print(auth_key)
@@ -94,9 +103,9 @@ async def get_categories_by_id_user(id_user: int,api_key: str = Depends(get_api_
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/check_category/")
-async def get_categories_by_id_user(body: JsonCategory,conn: asyncpg.Connection = Depends(get_db)):
+async def check_category(body: JsonCategory,conn: asyncpg.Connection = Depends(get_db)):
     try:
-        res=await conn.fetch("SELECT * FROM categories WHERE id_user=$1 AND name_category=$2",body.id_user,body.name_category)
+        res=await conn.fetch("SELECT * FROM categories WHERE id_user=$1 AND LOWER(name_category)=$2",body.id_user,body.name_category.lower())
         if res:
             return JSONResponse(
                 status_code=200,
