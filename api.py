@@ -93,18 +93,43 @@ async def auth_user(auth_key: str,id_user_tg: int,api_key: str = Depends(get_api
         )
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+
 @app.post("/start_task/")
-async def start_task(body: JsonStartTask, api_key: str = Depends(get_api_key), conn: asyncpg.Connection = Depends(get_db)):
+async def start_task(body: JsonStartTask, api_key: str = Depends(get_api_key),
+                     conn: asyncpg.Connection = Depends(get_db)):
     try:
-        res=await conn.fetchrow("SELECT id_category FROM categories WHERE id_user=$1 AND LOWER(name_category)=$2",body.id_user,body.name_category.lower())
-        # Добавляем задачу в базу данных
-        await conn.execute(
-             "INSERT INTO tasks (id_user, id_category, start_time) VALUES ($1, $2, NOW())",
-             body.id_user, res[0]
-         )
+        # Проверяем существование категории
+        res = await conn.fetchrow(
+            "SELECT id_category FROM categories WHERE id_user=$1 AND LOWER(name_category)=$2",
+            body.id_user,
+            body.name_category.lower()
+        )
+
+        # Если категории нет, создаем ее
+        if not res:
+            await conn.execute(
+                "INSERT INTO categories (id_user, name_category) VALUES ($1, $2)",
+                body.id_user,
+                body.name_category
+            )
+            res = await conn.fetchrow(
+                "SELECT id_category FROM categories WHERE id_user=$1 AND LOWER(name_category)=$2",
+                body.id_user,
+                body.name_category.lower()
+            )
+
+        # Создаем задачу и возвращаем id_task
+        row = await conn.fetchrow(
+            "INSERT INTO tasks (id_user, id_category, start_time) VALUES ($1, $2, NOW()) RETURNING id_task",
+            body.id_user,
+            res['id_category']
+        )
+        id_task = row['id_task']
+
         return JSONResponse(
             status_code=200,
-            content={"message": "Task started successfully"}
+            content={"message": "Task started successfully", "id_task": id_task}
         )
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
@@ -131,7 +156,7 @@ async def get_categories_by_id_user(id_user: int,api_key: str = Depends(get_api_
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/check_category/")
-async def check_category(body: JsonCategory,conn: asyncpg.Connection = Depends(get_db)):
+async def check_category(body: JsonCategory,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     try:
         res=await conn.fetch("SELECT * FROM categories WHERE id_user=$1 AND LOWER(name_category)=$2",body.id_user,body.name_category.lower())
         if res:
