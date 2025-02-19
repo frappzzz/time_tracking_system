@@ -108,7 +108,17 @@ async def start_task(body: JsonStartTask, api_key: str = Depends(get_api_key), c
         )
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
+@app.post("/stop_task/{id_task}")
+async def stop_task(id_task: int, api_key: str = Depends(get_api_key), conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        await conn.execute(
+             "UPDATE tasks SET end_time=NOW() WHERE id_task=$1",id_task)
+        return JSONResponse(
+            status_code=200,
+            content={"message": "Task stopped successfully"}
+        )
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/get_categories_by_id_user/{id_user}")
 async def get_categories_by_id_user(id_user: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     print(id_user)
