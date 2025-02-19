@@ -117,7 +117,7 @@ async def get_categories_by_id_user(id_user: int,api_key: str = Depends(get_api_
         if res:
             return res
         else:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise HTTPException(status_code=200, detail="User not found")
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/check_category/")

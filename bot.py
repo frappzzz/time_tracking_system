@@ -104,7 +104,8 @@ async def start_task_handler(sms: types.Message, state: FSMContext):
             categories = requests.get(f"{url}/get_categories_by_id_user/{id_user}", headers=headers)
             if categories.status_code == 200:
                 categories_list = categories.json()
-                if categories_list:
+                print(categories_list)
+                if 'detail' not in categories_list:
                     await state.update_data(categories=categories_list, current_page=0)
                     await show_categories_page(sms.from_user.id, state)
                 else:
