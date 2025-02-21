@@ -6,6 +6,7 @@ import asyncpg, asyncio
 import config
 import string, random
 from pydantic import BaseModel
+from datetime import datetime, timedelta
 from typing import Annotated, Union
 import json
 app = FastAPI()
@@ -45,8 +46,74 @@ async def get_db():
     async with pool.acquire() as connection:
         yield connection
 
-
-
+@app.get("/today_stats_seconds/{id_user}")
+async def today_stats_seconds(id_user: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        today=datetime.now() #3
+        today_0=today.replace(hour=0, minute=0, second=0, microsecond=0) #1
+        today_23=today.replace(hour=23, minute=59, second=59, microsecond=0) #2
+        res=await conn.fetch("""SELECT 
+    c.name_category, -- Выводим название категории вместо id_category
+    SUM(
+        CASE
+            -- Если задача началась до 21 февраля, считаем время с 21 февраля 00:00
+            WHEN t.start_time < $1 THEN 
+                EXTRACT(EPOCH FROM LEAST(t.end_time, $2) - $1)
+            -- Если задача началась 21 февраля, считаем полное время выполнения
+            ELSE 
+                EXTRACT(EPOCH FROM LEAST(t.end_time, $2) - t.start_time)
+        END
+    ) AS total_time_seconds
+FROM tasks t
+JOIN categories c ON t.id_category = c.id_category -- Присоединяем таблицу категорий
+WHERE 
+    t.id_user = $4 -- Учитываем только задачи для пользователя с id_user = 5
+    AND c.id_user = $4 -- Учитываем только категории для пользователя с id_user = 5
+    AND t.end_time IS NOT NULL -- Игнорируем задачи с end_time = NULL
+    AND (
+        -- Задачи, которые начались и закончились 21 февраля
+        (t.start_time::date = $3 AND t.end_time::date = $3)
+        OR
+        -- Задачи, которые начались до 21 февраля, но закончились 21 февраля
+        (t.start_time < $1 AND t.end_time::date = $3)
+        OR
+        -- Задачи, которые начались 21 февраля, но закончились после 21 февраля (но в пределах 21 февраля 23:59)
+        (t.start_time::date = $3 AND t.end_time <= $2)
+    )
+GROUP BY c.name_category; -- Группируем по названию категории""", today_0,today_23,today,id_user)
+#         res = await conn.fetch("""SELECT
+#     id_category,
+#     SUM(
+#         CASE
+#             -- Если задача началась до 21 февраля, считаем время с 21 февраля 00:00
+#             WHEN start_time < $1 THEN
+#                 EXTRACT(EPOCH FROM LEAST(end_time, $2) - $1)
+#             -- Если задача началась 21 февраля, считаем полное время выполнения
+#             ELSE
+#                 EXTRACT(EPOCH FROM LEAST(end_time, $2) - start_time)
+#         END
+#     ) AS total_time_seconds
+# FROM tasks
+# WHERE
+#     id_user = $4 -- Учитываем только задачи для пользователя с id_user = 5
+#     AND end_time IS NOT NULL -- Игнорируем задачи с end_time = NULL
+#     AND (
+#         -- Задачи, которые начались и закончились 21 февраля
+#         (start_time::date = $3 AND end_time::date = $3)
+#         OR
+#         -- Задачи, которые начались до 21 февраля, но закончились 21 февраля
+#         (start_time < $1 AND end_time::date = $3)
+#         OR
+#         -- Задачи, которые начались 21 февраля, но закончились после 21 февраля (но в пределах 21 февраля 23:59)
+#         (start_time::date = $3 AND end_time <= $2)
+#     )
+# GROUP BY id_category;""", today_0,today_23,today,id_user)
+        if res:
+            return dict(res)
+        else:
+            raise HTTPException(status_code=404, detail="Key not found")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/generate_auth_key")
 async def generate_auth_key(api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     auth_key=generate_code()
