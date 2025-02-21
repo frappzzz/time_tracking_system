@@ -46,6 +46,108 @@ async def get_db():
     async with pool.acquire() as connection:
         yield connection
 
+
+@app.get("/date_stats_chronological/")
+async def date_stats_chronological(id_user: int, date_user: str, api_key: str = Depends(get_api_key),
+                                   conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        # Преобразуем дату из формата dd.mm.yyyy в datetime
+        date_obj = datetime.strptime(date_user, "%d.%m.%Y")
+        date = date_obj.date()
+        date_yesterday = date - timedelta(days=1)
+        date_tomorrow = date + timedelta(days=1)
+
+        # Вычисляем временные границы
+        date_start = datetime.combine(date, datetime.min.time())
+        date_end = datetime.combine(date, datetime.max.time())
+
+        res = await conn.fetch("""
+            SELECT 
+                t.start_time,
+                t.end_time,
+                c.name_category,
+                CASE
+                    WHEN t.start_time::date = $1 THEN $3  -- Началась вчера
+                    ELSE t.start_time::date  -- Началась сегодня
+                END as adjusted_date
+            FROM tasks t
+            JOIN categories c ON t.id_category = c.id_category
+            WHERE 
+                t.id_user = $4
+                AND c.id_user = $4
+                AND t.end_time IS NOT NULL
+                AND (
+                    (t.start_time BETWEEN $1 AND $2)  -- Задачи, активные в целевом дне
+                    OR (t.end_time BETWEEN $1 AND $2)
+                )
+            ORDER BY GREATEST(t.start_time, $1), t.start_time
+        """, date_start, date_end, date_yesterday, id_user)
+
+        if res:
+            # Преобразуем записи в список словарей и форматируем даты
+            formatted_records = []
+            for record in res:
+                formatted = dict(record)
+                # Форматируем время для вывода
+                formatted['start_time'] = formatted['start_time'].strftime('%H:%M')
+                if formatted['end_time']:
+                    formatted['end_time'] = formatted['end_time'].strftime('%H:%M')
+                formatted_records.append(formatted)
+            return formatted_records
+        else:
+            raise HTTPException(status_code=404, detail="Нет данных за указанную дату")
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Неверный формат даты: {e}")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка базы данных: {e}")
+@app.get("/date_stats_seconds/")
+async def date_stats_seconds(id_user: int, date_user: str, api_key: str = Depends(get_api_key), conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        # Преобразуем дату из формата dd.mm.yyyy в yyyy-mm-dd
+        date_obj = datetime.strptime(date_user, "%d.%m.%Y")
+        date = date_obj.date()  # Получаем только дату без времени
+        date_0 = datetime.combine(date, datetime.min.time())  # Начало дня
+        date_23 = datetime.combine(date, datetime.max.time())  # Конец дня
+        date_tomorrow = date + timedelta(days=1)
+
+        res = await conn.fetch("""
+            SELECT 
+                c.name_category,
+                SUM(
+                    CASE
+                        WHEN t.start_time < $1 THEN 
+                            EXTRACT(EPOCH FROM LEAST(t.end_time, $2) - $1)
+                        WHEN t.start_time::date = $3 AND t.end_time::date = $3 THEN 
+                            EXTRACT(EPOCH FROM t.end_time - t.start_time)
+                        WHEN t.start_time::date = $3 AND t.end_time::date = $4 THEN 
+                            EXTRACT(EPOCH FROM $2 - t.start_time)
+                    END
+                ) AS total_time_seconds
+            FROM tasks t
+            JOIN categories c ON t.id_category = c.id_category
+            WHERE 
+                t.id_user = $5
+                AND c.id_user = $5
+                AND t.end_time IS NOT NULL
+                AND (
+                    (t.start_time::date = $3 AND t.end_time::date = $3)
+                    OR
+                    (t.start_time < $1 AND t.end_time::date = $3)
+                    OR
+                    (t.start_time::date = $3 AND t.end_time::date = $4)
+                )
+            GROUP BY c.name_category;
+        """, date_0, date_23, date, date_tomorrow, id_user)
+
+        if res:
+            return res
+        else:
+            raise HTTPException(status_code=404, detail="No data found for the specified date")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use dd.mm.yyyy")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/today_stats_seconds/{id_user}")
 async def today_stats_seconds(id_user: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     try:
