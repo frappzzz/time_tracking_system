@@ -114,6 +114,40 @@ GROUP BY c.name_category; -- Группируем по названию кате
             raise HTTPException(status_code=404, detail="Key not found")
     except asyncpg.PostgresError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+@app.get("/today_stats_chronological/{id_user}")
+async def today_stats_chronological(id_user: int,api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        today=datetime.now() #3
+        today_0=today.replace(hour=0, minute=0, second=0, microsecond=0) #1
+        today_23=today.replace(hour=23, minute=59, second=59, microsecond=0) #2
+        yesterday=today-timedelta(days=1) #4
+        res=await conn.fetch("""SELECT 
+    t.id_task,
+    t.id_user,
+    t.id_category,
+    c.name_category, -- Добавляем название категории
+    t.start_time,
+    t.end_time
+FROM tasks t
+JOIN categories c ON t.id_category = c.id_category -- Присоединяем таблицу категорий
+WHERE 
+    t.id_user = $3 -- Учитываем только задачи для пользователя с id_user = 5
+    AND c.id_user = $3 -- Учитываем только категории для пользователя с id_user = 5
+    AND t.end_time IS NOT NULL -- Исключаем задачи с end_time = NULL
+    AND (
+        -- Задачи, которые начались 20 февраля и закончились 21 февраля
+        (t.start_time::date = $2 AND t.end_time::date = $1)
+        OR
+        -- Задачи, которые начались и закончились 21 февраля
+        (t.start_time::date = $1 AND t.end_time::date = $1)
+    )
+ORDER BY t.start_time; -- Сортируем по start_time в хронологическом порядке""", today,yesterday,id_user)
+        if res:
+            return res
+        else:
+            raise HTTPException(status_code=404, detail="Key not found")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/generate_auth_key")
 async def generate_auth_key(api_key: str = Depends(get_api_key),conn: asyncpg.Connection = Depends(get_db)):
     auth_key=generate_code()
