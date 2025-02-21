@@ -26,7 +26,10 @@ Disp.include_router(router)
 url = "http://127.0.0.1:5000"
 headers = {config.FASTAPI_KEY_NAME: config.FASTAPI_TOKEN}
 
-
+def seconds_to_hours_minutes(seconds):
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{hours} ч. {minutes} мин."
 # Состояния бота
 class States(StatesGroup):
     auth = State()
@@ -328,7 +331,143 @@ async def stop_task_handler(message: types.Message, state: FSMContext):
 async def handle_other_commands_in_task(message: types.Message):
     await message.answer("Доступна только команда /stop_task")
 
+@Disp.message(States.mainmenu, Command('today_stats'))
+async def today_stats_handler(message: types.Message, state: FSMContext):
+    try:
+        user_data = await state.get_data()
+        id_user = user_data.get("id_user")
 
+        # Получаем статистику за день в секундах
+        stats_seconds = requests.get(f"{url}/today_stats_seconds/{id_user}", headers=headers)
+        if stats_seconds.status_code != 200:
+            await message.answer("Ошибка при получении статистики за день.")
+            return
+
+        # Получаем хронологический порядок задач
+        chronological_stats = requests.get(f"{url}/today_stats_chronological/{id_user}", headers=headers)
+        if chronological_stats.status_code != 200:
+            await message.answer("Ошибка при получении хронологического порядка задач.")
+            return
+
+        # Преобразуем секунды в часы и минуты
+        stats_dict = stats_seconds.json()
+        stats_text = "📊 Статистика за день:\n\n"
+        for category, seconds in stats_dict.items():
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            stats_text += f"📌 {category}: {hours} ч. {minutes} мин.\n"
+
+        # Добавляем хронологический порядок задач
+        chronological_list = chronological_stats.json()
+        stats_text += "\n⏳ Хронологический порядок задач:\n\n"
+        for task in chronological_list:
+            start_time = datetime.fromisoformat(task['start_time'])
+            end_time = datetime.fromisoformat(task['end_time']) if task['end_time'] else None
+
+            # Форматируем дату и время
+            start_date_str = start_time.strftime('%d.%m %H:%M')
+            if end_time:
+                if start_time.date() == end_time.date():
+                    # Задача началась и закончилась в один день
+                    end_date_str = end_time.strftime('%H:%M')
+                    stats_text += f"⏰ {task['name_category']}: {start_date_str} - {end_date_str}\n"
+                else:
+                    # Задача началась вчера, а закончилась сегодня
+                    end_date_str = end_time.strftime('%d.%m %H:%M')
+                    stats_text += f"⏰ {task['name_category']}: {start_date_str} - {end_date_str}\n"
+            else:
+                # Задача еще не завершена
+                stats_text += f"⏰ {task['name_category']}: {start_date_str} - не завершено\n"
+
+        await message.answer(stats_text)
+
+    except Exception as e:
+        await message.answer(f"Произошла ошибка: {e}")
+
+
+@Disp.message(States.mainmenu, Command('stats'))
+async def stats_handler(message: types.Message, state: FSMContext):
+    try:
+        # Парсим дату из сообщения
+        date_str = message.text.split(maxsplit=1)[1].strip()
+
+        # Валидация даты
+        try:
+            datetime.strptime(date_str, "%d.%m.%Y")
+        except ValueError:
+            await message.answer("❌ Используйте формат ДД.ММ.ГГГГ (например: 21.02.2024)")
+            return
+
+        user_data = await state.get_data()
+        id_user = user_data.get("id_user")
+
+        # Получаем статистику
+        stats = await get_stats(id_user, date_str)
+
+        # Формируем сообщение
+        response = await format_stats_response(stats, date_str)
+
+        await message.answer(response)
+
+    except IndexError:
+        await message.answer("📌 Используйте: /stats ДД.ММ.ГГГГ")
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {str(e)}")
+
+
+async def get_stats(id_user: int, date_str: str) -> dict:
+    """Получает данные статистики из API"""
+    stats = {}
+
+    # Запрос статистики по времени
+    stats_response = requests.get(
+        f"{url}/date_stats_seconds/{id_user}",
+        params={"date_user": date_str,
+                "id_user": id_user},
+        headers=headers
+    )
+    stats['seconds'] = stats_response.json() if stats_response.status_code == 200 else {}
+
+    # Запрос хронологии задач
+    chrono_response = requests.get(
+        f"{url}/date_stats_chronological/",
+        params={"date_user": date_str,
+                "id_user":id_user},
+        headers=headers
+    )
+    stats['chrono'] = chrono_response.json() if chrono_response.status_code == 200 else []
+
+    return stats
+
+
+async def format_stats_response(stats: dict, date_str: str) -> str:
+    """Форматирует данные статистики в читаемое сообщение"""
+    # Заголовок
+    response = f"📊 Статистика за {date_str}\n\n"
+
+    # Секция с категориями
+    if stats['seconds']:
+        response += "🕒 Суммарное время по категориям:\n"
+        for category, seconds in stats['seconds'].items():
+            mins, secs = divmod(seconds, 60)
+            hours, mins = divmod(mins, 60)
+            response += f"▫️ {category}: {hours:02d}:{mins:02d}\n"
+    else:
+        response += "ℹ️ Нет данных о времени\n"
+
+    # Секция с хронологией
+    response += "\n📅 Хронология задач:\n"
+    if stats['chrono']:
+        for i, task in enumerate(stats['chrono'], 1):
+            end_time = task['end_time'] or "не завершена"
+            response += (
+                f"{i}. {task['name_category']}\n"
+                f"   🕑 {task['start_time']} — {end_time}\n"
+            )
+    else:
+        response += "ℹ️ Нет данных о задачах\n"
+
+    return response
 # Запуск бота
 if __name__ == "__main__":
     Disp.run_polling(bot)
