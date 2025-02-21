@@ -11,6 +11,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import requests
+from datetime import datetime, timedelta
 import config
 import json
 from typing import Optional
@@ -93,6 +94,7 @@ async def show_guide(user_id: int):
         "/auth {code} - Авторизация\n"
         "/start_task {category} - Начать задачу с категорией. Если ее нет, то добавится новая категория\n"
         "/start_task - Начать задачу, далее выведет список категорий. Если их нет, то предложит создать новую категорию\n"
+        "/help - Руководство по командам\n"
         "/stop_task - Остановить задачу\n\n"
         "Используйте кнопки ниже для создания задач и категорий."
     )
@@ -107,7 +109,9 @@ async def show_main_menu(user_id: int):
     builder.adjust(2)
     await bot.send_message(user_id, "Выберите действие:", reply_markup=builder.as_markup(resize_keyboard=True))
 
-
+@Disp.message(StateFilter(States.mainmenu), Command('help'))
+async def helper(sms: types.Message, state: FSMContext):
+    await show_guide(sms.from_user.id)
 # Обработка создания задачи
 @Disp.message(States.mainmenu, F.text == "Создать задачу")
 @Disp.message(States.mainmenu, Command('start_task'))
@@ -263,11 +267,34 @@ async def next_page(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# Обработка выбора категории для старта задачи
 @Disp.callback_query(F.data.startswith("start_task_"))
 async def start_task_from_button(callback: types.CallbackQuery, state: FSMContext):
     name_category = callback.data.split("_")[2]
-    await start_task_flow(callback.from_user.id, name_category, state)
+    user_data = await state.get_data()
+    id_user = user_data.get("id_user")
+
+    # Запускаем задачу через API
+    response = requests.post(
+        f"{url}/start_task/",
+        json={"id_user": id_user, "name_category": name_category},
+        headers=headers
+    )
+
+    if response.status_code == 200:
+        id_task = response.json().get("id_task")
+        await state.update_data(current_task_id=id_task)
+        await state.set_state(States.in_task)
+
+        # Редактируем сообщение с кнопками, добавляя информацию о начале задачи
+        await callback.message.edit_text(
+            text=f"⏳ Задача '{name_category}' начата!\nДля остановки используйте /stop_task",
+            reply_markup=None  # Убираем кнопки, так как задача уже начата
+        )
+    else:
+        await callback.message.edit_text(
+            text="🚫 Не удалось начать задачу",
+            reply_markup=None
+        )
     await callback.answer()
 
 
