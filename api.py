@@ -46,7 +46,54 @@ async def get_db():
     async with pool.acquire() as connection:
         yield connection
 
+@app.get("/date_stats_pie_chart/")
+async def date_stats_pie_chart(id_user: int, date_user: str, api_key: str = Depends(get_api_key),
+                               conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        # Преобразуем дату из формата dd.mm.yyyy в datetime
+        date_obj = datetime.strptime(date_user, "%d.%m.%Y")
+        date = date_obj.date()
+        date_0 = datetime.combine(date, datetime.min.time())  # Начало дня
+        date_23 = datetime.combine(date, datetime.max.time())  # Конец дня
+        date_tomorrow = date + timedelta(days=1)
 
+        res = await conn.fetch("""
+            SELECT 
+                c.name_category,
+                SUM(
+                    CASE
+                        WHEN t.start_time < $1 THEN 
+                            EXTRACT(EPOCH FROM LEAST(t.end_time, $2) - $1)
+                        WHEN t.start_time::date = $3 AND t.end_time::date = $3 THEN 
+                            EXTRACT(EPOCH FROM t.end_time - t.start_time)
+                        WHEN t.start_time::date = $3 AND t.end_time::date = $4 THEN 
+                            EXTRACT(EPOCH FROM $2 - t.start_time)
+                    END
+                ) AS total_time_seconds
+            FROM tasks t
+            JOIN categories c ON t.id_category = c.id_category
+            WHERE 
+                t.id_user = $5
+                AND c.id_user = $5
+                AND t.end_time IS NOT NULL
+                AND (
+                    (t.start_time::date = $3 AND t.end_time::date = $3)
+                    OR
+                    (t.start_time < $1 AND t.end_time::date = $3)
+                    OR
+                    (t.start_time::date = $3 AND t.end_time::date = $4)
+                )
+            GROUP BY c.name_category;
+        """, date_0, date_23, date, date_tomorrow, id_user)
+
+        if res:
+            return res
+        else:
+            raise HTTPException(status_code=404, detail="No data found for the specified date")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use dd.mm.yyyy")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/date_stats_chronological/")
 async def date_stats_chronological(id_user: int, date_user: str, api_key: str = Depends(get_api_key),
                                    conn: asyncpg.Connection = Depends(get_db)):

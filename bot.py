@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 import config
 import json
 from typing import Optional
+import io
+import matplotlib.pyplot as plt
 
 # Инициализация бота и диспетчера
 bot = Bot(token=config.TG_BOT_TOKEN)
@@ -36,8 +38,54 @@ class States(StatesGroup):
     mainmenu = State()
     in_task = State()
     create_category = State()
+plt.style.use('dark_background')  # Темная тема
+plt.rcParams['font.family'] = 'Cascadia Code'  # Шрифт Cascadia Code
+plt.rcParams['font.size'] = 12  # Размер шрифта
 
+async def create_pie_chart(data: dict, date_str: str):
+    categories = list(data.keys())
+    time_seconds = list(data.values())
 
+    # Преобразуем секунды в часы и минуты
+    time_hours_minutes = [f"{int(seconds // 3600)} ч. {int((seconds % 3600) // 60)} мин." for seconds in time_seconds]
+
+    # Создаем фигуру с двумя областями: слева текст, справа диаграмма
+    fig, (ax_text, ax_pie) = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={'width_ratios': [1, 2]})
+
+    # Отключаем оси для текстовой области
+    ax_text.axis('off')
+
+    # Создаем текстовую информацию
+    text_content = "\n".join([f"{cat}: {time}" for cat, time in zip(categories, time_hours_minutes)])
+    ax_text.text(0.1, 0.5, text_content, fontsize=12, va='center', ha='left', color='white')
+
+    # Создаем круговую диаграмму
+    colors = plt.cm.viridis(range(len(categories)))  # Цвета из футуристичной палитры
+    wedges, texts, autotexts = ax_pie.pie(
+        time_seconds,
+        labels=categories,
+        autopct='%1.1f%%',
+        startangle=140,
+        colors=colors,
+        textprops={'color': 'white'}  # Белый текст для процентов
+    )
+
+    # Настройка внешнего вида диаграммы
+    ax_pie.set_title(f"Распределение времени по категориям за {date_str}", color='white', fontsize=14)
+    ax_pie.axis('equal')  # Чтобы диаграмма была круглой
+
+    # Добавляем тень для футуристичного эффекта
+    for wedge in wedges:
+        wedge.set_edgecolor('black')  # Черные границы для секторов
+        wedge.set_linewidth(1.5)  # Толщина границ
+
+    # Сохраняем диаграмму в буфер
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', facecolor='#1e1e1e')  # Темный фон
+    buf.seek(0)
+    plt.close()
+
+    return buf
 # Команда /start
 @Disp.message(StateFilter(None), Command('start'))
 async def starting(sms: types.Message, state: FSMContext):
@@ -99,7 +147,8 @@ async def show_guide(user_id: int):
         "/start_task - Начать задачу, далее выведет список категорий. Если их нет, то предложит создать новую категорию\n"
         "/stop_task - Остановить задачу\n"
         "/today_stats - Вывод статистики за сегодняшний день\n"
-        "/stats {dd.mm.yyyy} - Вывод статистики за день. Пример ввода: /stats 21.02.2025\n"
+        "/stats {dd.mm.yyyy} - Вывод статистики за день.\nПример ввода: /stats 21.02.2025\n"
+        "/stats_pie_chart {dd.mm.yyyy} - Вывод круговой диаграммы за день.\nПример ввода: /stats_pie_chart 21.02.2025\n"
         "/help - Руководство по командам\n\n"
         "Используйте кнопки ниже для создания задач и категорий."
     )
@@ -493,6 +542,47 @@ async def format_stats_response(stats: dict, date_str: str) -> str:
         response += "ℹ️ Нет данных о задачах\n"
 
     return response
+@Disp.message(States.mainmenu, Command('stats_pie_chart'))
+async def stats_pie_chart_handler(message: types.Message, state: FSMContext):
+    try:
+        # Парсим дату из сообщения
+        date_str = message.text.split(maxsplit=1)[1].strip()
+
+        # Валидация даты
+        try:
+            datetime.strptime(date_str, "%d.%m.%Y")
+        except ValueError:
+            await message.answer("❌ Используйте формат ДД.ММ.ГГГГ (например: 21.02.2024)")
+            return
+
+        user_data = await state.get_data()
+        id_user = user_data.get("id_user")
+
+        # Получаем данные для диаграммы
+        stats_response = requests.get(
+            f"{url}/date_stats_pie_chart/",
+            params={"date_user": date_str, "id_user": id_user},
+            headers=headers
+        )
+
+        if stats_response.status_code != 200:
+            await message.answer("Ошибка при получении данных для диаграммы.")
+            return
+
+        stats_data = stats_response.json()
+        stats_dict = {item['name_category']: item['total_time_seconds'] for item in stats_data}
+
+        # Создаем круговую диаграмму
+        chart_buffer = await create_pie_chart(stats_dict, date_str)
+
+        # Отправляем диаграмму пользователю
+        chart_buffer.seek(0)
+        await message.answer_photo(BufferedInputFile(chart_buffer.read(), filename="pie_chart.png"))
+
+    except IndexError:
+        await message.answer("📌 Используйте: /stats_pie_chart ДД.ММ.ГГГГ")
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {str(e)}")
 # Запуск бота
 if __name__ == "__main__":
     Disp.run_polling(bot)
