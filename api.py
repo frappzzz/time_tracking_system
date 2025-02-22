@@ -46,6 +46,102 @@ async def get_db():
     async with pool.acquire() as connection:
         yield connection
 
+
+@app.get("/period_stats_chronological/")
+async def period_stats_chronological(id_user: int, start_date_user: str, end_date_user: str,
+                                     api_key: str = Depends(get_api_key), conn: asyncpg.Connection = Depends(get_db)):
+    print(id_user,start_date_user,end_date_user)
+    try:
+        # Преобразуем даты из формата dd.mm.yyyy в datetime
+        start_date_obj = datetime.strptime(start_date_user, "%d.%m.%Y")
+        end_date_obj = datetime.strptime(end_date_user, "%d.%m.%Y")
+
+        start_date = start_date_obj.date()
+        end_date = end_date_obj.date()
+
+        start_date_0 = datetime.combine(start_date, datetime.min.time())  # Начало дня старта
+        end_date_23 = datetime.combine(end_date, datetime.max.time())  # Конец дня конца
+        print(start_date_0)
+        res = await conn.fetch("""
+            SELECT 
+                t.start_time,
+                t.end_time,
+                c.name_category
+            FROM tasks t
+            JOIN categories c ON t.id_category = c.id_category
+            WHERE 
+                t.id_user = $1
+                AND c.id_user = $1
+                AND t.end_time IS NOT NULL
+                AND (
+                    (t.start_time BETWEEN $2 AND $3)
+                    OR (t.end_time BETWEEN $2 AND $3)
+                    OR (t.start_time < $2 AND t.end_time > $3)
+                )
+            ORDER BY t.start_time;
+        """, id_user,start_date_0, end_date_23 )
+        print(res)
+        if res:
+            return res
+        else:
+            raise HTTPException(status_code=404, detail="No data found for the specified period")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use dd.mm.yyyy")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+@app.get("/period_stats_seconds/")
+async def period_stats_seconds(id_user: int, start_date_user: str, end_date_user: str,
+                               api_key: str = Depends(get_api_key), conn: asyncpg.Connection = Depends(get_db)):
+    try:
+        # Преобразуем даты из формата dd.mm.yyyy в datetime
+        start_date_obj = datetime.strptime(start_date_user, "%d.%m.%Y")
+        end_date_obj = datetime.strptime(end_date_user, "%d.%m.%Y")
+
+        start_date = start_date_obj.date()
+        end_date = end_date_obj.date()
+
+        start_date_0 = datetime.combine(start_date, datetime.min.time())  # Начало дня старта
+        end_date_23 = datetime.combine(end_date, datetime.max.time())  # Конец дня конца
+
+        res = await conn.fetch("""
+            SELECT 
+                c.name_category,
+                SUM(
+                    CASE
+                        WHEN t.start_time < $1 THEN 
+                            EXTRACT(EPOCH FROM LEAST(t.end_time, $2) - $1)
+                        WHEN t.start_time::date >= $3 AND t.end_time::date <= $4 THEN 
+                            EXTRACT(EPOCH FROM t.end_time - t.start_time)
+                        WHEN t.start_time::date < $3 AND t.end_time::date > $4 THEN 
+                            EXTRACT(EPOCH FROM $2 - $1)
+                        WHEN t.start_time::date < $3 AND t.end_time::date <= $4 THEN 
+                            EXTRACT(EPOCH FROM t.end_time - $1)
+                        WHEN t.start_time::date >= $3 AND t.end_time::date > $4 THEN 
+                            EXTRACT(EPOCH FROM $2 - t.start_time)
+                    END
+                ) AS total_time_seconds
+            FROM tasks t
+            JOIN categories c ON t.id_category = c.id_category
+            WHERE 
+                t.id_user = $5
+                AND c.id_user = $5
+                AND t.end_time IS NOT NULL
+                AND (
+                    (t.start_time BETWEEN $1 AND $2)
+                    OR (t.end_time BETWEEN $1 AND $2)
+                    OR (t.start_time < $1 AND t.end_time > $2)
+                )
+            GROUP BY c.name_category;
+        """, start_date_0, end_date_23, start_date, end_date, id_user)
+
+        if res:
+            return res
+        else:
+            raise HTTPException(status_code=404, detail="No data found for the specified period")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use dd.mm.yyyy")
+    except asyncpg.PostgresError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 @app.get("/date_stats_pie_chart/")
 async def date_stats_pie_chart(id_user: int, date_user: str, api_key: str = Depends(get_api_key),
                                conn: asyncpg.Connection = Depends(get_db)):
@@ -131,26 +227,10 @@ async def date_stats_chronological(id_user: int, date_user: str, api_key: str = 
             formatted_records = []
             for record in res:
                 formatted = dict(record)
-                # Форматируем время для вывода
-                start_time = formatted['start_time']
-                end_time = formatted['end_time']
-
-                # Если задача началась вчера, добавляем дату
-                if start_time.date() < date:
-                    start_str = start_time.strftime('%d.%m %H:%M')
-                else:
-                    start_str = start_time.strftime('%H:%M')
-
-                # Если задача закончилась завтра, добавляем дату
-                if end_time.date() > date:
-                    end_str = end_time.strftime('%d.%m %H:%M')
-                else:
-                    end_str = end_time.strftime('%H:%M')
-
-                formatted['start_time'] = start_str
-                formatted['end_time'] = end_str
+                # Преобразуем время в строку ISO
+                formatted['start_time'] = formatted['start_time'].isoformat()
+                formatted['end_time'] = formatted['end_time'].isoformat() if formatted['end_time'] else None
                 formatted_records.append(formatted)
-            print(formatted_records)
             return formatted_records
         else:
             raise HTTPException(status_code=404, detail="Нет данных за указанную дату")

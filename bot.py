@@ -7,8 +7,7 @@ from aiogram.enums.parse_mode import ParseMode
 import asyncio
 from aiogram.types import FSInputFile, BufferedInputFile
 from aiogram.utils.media_group import MediaGroupBuilder
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardRemove,InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import requests
 from datetime import datetime, timedelta
@@ -16,8 +15,10 @@ import config
 import json
 from typing import Optional
 import io
+import csv
 import matplotlib.pyplot as plt
-
+import random
+import string
 # Инициализация бота и диспетчера
 bot = Bot(token=config.TG_BOT_TOKEN)
 Disp = Dispatcher()
@@ -153,6 +154,7 @@ async def show_guide(user_id: int):
         "/today_stats - Вывод статистики за сегодняшний день\n"
         "/stats {dd.mm.yyyy} - Вывод статистики за день.\nПример ввода: /stats 21.02.2025\n"
         "/stats_pie_chart {dd.mm.yyyy} - Вывод круговой диаграммы за день.\nПример ввода: /stats_pie_chart 21.02.2025\n"
+        "/stats_period {dd.mm.yyyy} {dd.mm.yyyy} - Вывод статистики за период с экспортом хронологии в CSV.\nПример ввода: /stats_period 21.02.2025 22.02.2025\n"
         "/help - Руководство по командам\n\n"
         "Используйте кнопки ниже для создания задач и категорий."
     )
@@ -412,10 +414,8 @@ async def today_stats_handler(message: types.Message, state: FSMContext):
         if stats_dict:
             stats_text += "🕒 Суммарное время по категориям:\n"
             for category, seconds in stats_dict.items():
-                total_seconds = int(seconds)  # Преобразуем в целое число
-                hours = total_seconds // 3600
-                minutes = (total_seconds % 3600) // 60
-                stats_text += f"▫️ {category}: {hours:02d}:{minutes:02d}\n"
+                time_str = seconds_to_hours_minutes(int(seconds))
+                stats_text += f"▫️ {category}: {time_str}\n"
         else:
             stats_text += "ℹ️ Нет данных о времени\n"
 
@@ -436,9 +436,11 @@ async def today_stats_handler(message: types.Message, state: FSMContext):
                     else:
                         # Задача началась вчера, а закончилась сегодня
                         end_date_str = end_time.strftime('%d.%m %H:%M')
+                    duration = (end_time - start_time).total_seconds()
+                    duration_str = seconds_to_hours_minutes(int(duration))
                     stats_text += (
                         f"{i}. {task['name_category']}\n"
-                        f"   🕑 {start_date_str} — {end_date_str}\n"
+                        f"   🕑 {start_date_str} — {end_date_str} ({duration_str})\n"
                     )
                 else:
                     stats_text += (
@@ -452,7 +454,6 @@ async def today_stats_handler(message: types.Message, state: FSMContext):
 
     except Exception as e:
         await message.answer(f"Произошла ошибка: {e}")
-
 @Disp.message(States.mainmenu, Command('stats'))
 async def stats_handler(message: types.Message, state: FSMContext):
     try:
@@ -522,11 +523,8 @@ async def format_stats_response(stats: dict, date_str: str) -> str:
     if stats['seconds'] and isinstance(stats['seconds'], dict):
         response += "🕒 Суммарное время по категориям:\n"
         for category, seconds in stats['seconds'].items():
-            # Преобразуем секунды в часы и минуты
-            total_seconds = int(seconds)  # Преобразуем в целое число
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            response += f"▫️ {category}: {hours:02d}:{minutes:02d}\n"
+            time_str = seconds_to_hours_minutes(int(seconds))
+            response += f"▫️ {category}: {time_str}\n"
     else:
         response += "ℹ️ Нет данных о времени\n"
 
@@ -534,18 +532,36 @@ async def format_stats_response(stats: dict, date_str: str) -> str:
     response += "\n📅 Хронология задач:\n"
     if stats['chrono'] and isinstance(stats['chrono'], list):
         for i, task in enumerate(stats['chrono'], 1):
-            # Форматируем время для вывода
-            start_time = task['start_time']
-            end_time = task['end_time'] if 'end_time' in task else None
+            # Преобразуем время из ISO формата
+            start_time = datetime.fromisoformat(task['start_time'])
+            end_time = datetime.fromisoformat(task['end_time']) if task['end_time'] else None
 
-            response += (
-                f"{i}. {task['name_category']}\n"
-                f"   🕑 {start_time} — {end_time if end_time else 'не завершена'}\n"
-            )
+            # Форматируем дату и время
+            start_date_str = start_time.strftime('%d.%m %H:%M')
+            if end_time:
+                if start_time.date() == end_time.date():
+                    # Задача началась и закончилась в один день
+                    end_date_str = end_time.strftime('%H:%M')
+                else:
+                    # Задача началась вчера, а закончилась сегодня
+                    end_date_str = end_time.strftime('%d.%m %H:%M')
+                duration = (end_time - start_time).total_seconds()
+                duration_str = seconds_to_hours_minutes(int(duration))
+                response += (
+                    f"{i}. {task['name_category']}\n"
+                    f"   🕑 {start_date_str} — {end_date_str} ({duration_str})\n"
+                )
+            else:
+                response += (
+                    f"{i}. {task['name_category']}\n"
+                    f"   🕑 {start_date_str} — не завершена\n"
+                )
     else:
         response += "ℹ️ Нет данных о задачах\n"
 
     return response
+
+
 @Disp.message(States.mainmenu, Command('stats_pie_chart'))
 async def stats_pie_chart_handler(message: types.Message, state: FSMContext):
     try:
@@ -585,6 +601,116 @@ async def stats_pie_chart_handler(message: types.Message, state: FSMContext):
 
     except IndexError:
         await message.answer("📌 Используйте: /stats_pie_chart ДД.ММ.ГГГГ")
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {str(e)}")
+@Disp.message(States.mainmenu, Command('stats_period'))
+async def stats_period_handler(message: types.Message, state: FSMContext):
+    try:
+        # Парсим даты из сообщения
+        args = message.text.split(maxsplit=2)
+        if len(args) < 3:
+            await message.answer("📌 Используйте: /stats_perид ДД.ММ.ГГГГ ДД.ММ.ГГГГ")
+            return
+
+        start_date_str = args[1].strip()
+        end_date_str = args[2].strip()
+
+        # Валидация дат
+        try:
+            start_date = datetime.strptime(start_date_str, "%d.%m.%Y")
+            end_date = datetime.strptime(end_date_str, "%d.%m.%Y")
+        except ValueError:
+            await message.answer("❌ Используйте формат ДД.ММ.ГГГГ (например: 21.02.2024)")
+            return
+
+        if start_date > end_date:
+            await message.answer("❌ Дата начала должна быть раньше даты окончания.")
+            return
+
+        user_data = await state.get_data()
+        id_user = user_data.get("id_user")
+
+        # Получаем статистику за период
+        stats_response = requests.get(
+            f"{url}/period_stats_seconds/",
+            params={"start_date_user": start_date_str, "end_date_user": end_date_str, "id_user": id_user},
+            headers=headers
+        )
+
+        if stats_response.status_code != 200:
+            await message.answer("Ошибка при получении статистики за период.")
+            return
+
+        stats_data = stats_response.json()
+        stats_dict = {item['name_category']: item['total_time_seconds'] for item in stats_data}
+
+        # Формируем сообщение
+        response = f"📊 Статистика за период с {start_date_str} по {end_date_str}:\n\n"
+        if stats_dict:
+            response += "🕒 Суммарное время по категориям:\n"
+            for category, seconds in stats_dict.items():
+                time_str = seconds_to_hours_minutes(int(seconds))
+                response += f"▫️ {category}: {time_str}\n"
+        else:
+            response += "ℹ️ Нет данных о времени\n"
+
+        # Получаем хронологический порядок задач
+        chrono_response = requests.get(
+            f"{url}/period_stats_chronological/",
+            params={"start_date_user": start_date_str, "end_date_user": end_date_str, "id_user": id_user},
+            headers=headers
+        )
+
+        if chrono_response.status_code != 200:
+            await message.answer("Ошибка при получении хронологического порядка задач.")
+            return
+
+        chrono_data = chrono_response.json()
+
+        # Создаем CSV файл
+        csv_buffer = io.StringIO()
+        csv_writer = csv.writer(csv_buffer)
+
+        # Записываем заголовки
+        csv_writer.writerow(["Дата начала", "Дата окончания", "Категория", "Начало", "Конец", "Длительность"])
+
+        for task in chrono_data:
+            start_time_str = task['start_time']
+            end_time_str = task['end_time']
+            category = task['name_category']
+
+            # Преобразуем строки в объекты datetime
+            start_time = datetime.fromisoformat(start_time_str)
+            end_time = datetime.fromisoformat(end_time_str) if end_time_str else None
+
+            # Форматируем дату и время
+            start_date = start_time.strftime('%d.%m.%Y')
+            end_date = end_time.strftime('%d.%m.%Y') if end_time else "не завершена"
+            start_time_formatted = start_time.strftime('%H:%M')
+            end_time_formatted = end_time.strftime('%H:%M') if end_time else "не завершена"
+
+            # Вычисляем длительность
+            duration = (end_time - start_time).total_seconds() if end_time else 0
+            duration_str = seconds_to_hours_minutes(int(duration))
+
+            # Записываем строку в CSV
+            csv_writer.writerow([start_date, end_date, category, start_time_formatted, end_time_formatted, duration_str])
+
+        # Преобразуем содержимое буфера в байты с кодировкой utf-8-sig
+        csv_buffer.seek(0)
+        csv_bytes = csv_buffer.getvalue().encode('utf-8-sig')
+
+        # Генерируем имя файла
+        random_suffix = f"{random.choice(string.ascii_uppercase)}{''.join(random.choices(string.digits, k=4))}"
+        filename = f"stats_period_{start_date_str}_{end_date_str}_{random_suffix}.csv"
+
+        # Отправляем CSV файл
+        csv_file = BufferedInputFile(csv_bytes, filename=filename)
+        await message.answer_document(csv_file)
+
+        # Отправляем текстовую статистику
+        await message.answer(response)
+
     except Exception as e:
         await message.answer(f"⚠️ Ошибка: {str(e)}")
 # Запуск бота
