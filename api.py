@@ -241,33 +241,6 @@ WHERE
         (t.start_time::date = $3 AND t.end_time <= $2)
     )
 GROUP BY c.name_category; -- Группируем по названию категории""", today_0,today_23,today,id_user)
-#         res = await conn.fetch("""SELECT
-#     id_category,
-#     SUM(
-#         CASE
-#             -- Если задача началась до 21 февраля, считаем время с 21 февраля 00:00
-#             WHEN start_time < $1 THEN
-#                 EXTRACT(EPOCH FROM LEAST(end_time, $2) - $1)
-#             -- Если задача началась 21 февраля, считаем полное время выполнения
-#             ELSE
-#                 EXTRACT(EPOCH FROM LEAST(end_time, $2) - start_time)
-#         END
-#     ) AS total_time_seconds
-# FROM tasks
-# WHERE
-#     id_user = $4 -- Учитываем только задачи для пользователя с id_user = 5
-#     AND end_time IS NOT NULL -- Игнорируем задачи с end_time = NULL
-#     AND (
-#         -- Задачи, которые начались и закончились 21 февраля
-#         (start_time::date = $3 AND end_time::date = $3)
-#         OR
-#         -- Задачи, которые начались до 21 февраля, но закончились 21 февраля
-#         (start_time < $1 AND end_time::date = $3)
-#         OR
-#         -- Задачи, которые начались 21 февраля, но закончились после 21 февраля (но в пределах 21 февраля 23:59)
-#         (start_time::date = $3 AND end_time <= $2)
-#     )
-# GROUP BY id_category;""", today_0,today_23,today,id_user)
         if res:
             return dict(res)
         else:

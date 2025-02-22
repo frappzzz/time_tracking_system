@@ -55,33 +55,37 @@ async def create_pie_chart(data: dict, date_str: str):
     # Отключаем оси для текстовой области
     ax_text.axis('off')
 
-    # Создаем текстовую информацию
+    # Создаем текстовую информацию (желтый текст)
     text_content = "\n".join([f"{cat}: {time}" for cat, time in zip(categories, time_hours_minutes)])
-    ax_text.text(0.1, 0.5, text_content, fontsize=12, va='center', ha='left', color='white')
+    ax_text.text(0.1, 0.5, text_content, fontsize=12, va='center', ha='left', color='yellow')
 
     # Создаем круговую диаграмму
-    colors = plt.cm.viridis(range(len(categories)))  # Цвета из футуристичной палитры
+    colors = ['yellow'] * len(categories)  # Все сектора желтые
     wedges, texts, autotexts = ax_pie.pie(
         time_seconds,
         labels=categories,
         autopct='%1.1f%%',
         startangle=140,
         colors=colors,
-        textprops={'color': 'white'}  # Белый текст для процентов
+        textprops={'color': 'black'}  # Белый текст для процентов
     )
 
     # Настройка внешнего вида диаграммы
-    ax_pie.set_title(f"Распределение времени по категориям за {date_str}", color='white', fontsize=14)
+    ax_pie.set_title(f"Распределение времени по категориям за {date_str}", color='yellow', fontsize=14)
     ax_pie.axis('equal')  # Чтобы диаграмма была круглой
 
-    # Добавляем тень для футуристичного эффекта
+    # Добавляем черные границы для секторов
     for wedge in wedges:
         wedge.set_edgecolor('black')  # Черные границы для секторов
         wedge.set_linewidth(1.5)  # Толщина границ
 
+    # Меняем цвет текста за кругом (надписи категорий) на желтый
+    for text in texts:
+        text.set_color('yellow')
+
     # Сохраняем диаграмму в буфер
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', facecolor='#1e1e1e')  # Темный фон
+    plt.savefig(buf, format='png', bbox_inches='tight', facecolor='#2e2e2e')  # Темно-серый фон
     buf.seek(0)
     plt.close()
 
