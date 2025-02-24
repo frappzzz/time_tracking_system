@@ -4,21 +4,18 @@ from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums.parse_mode import ParseMode
-import asyncio
+import asyncio, requests, config, json, io,csv,random, string
 from aiogram.types import FSInputFile, BufferedInputFile
 from aiogram.utils.media_group import MediaGroupBuilder
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardRemove,InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-import requests
 from datetime import datetime, timedelta
-import config
-import json
+
 from typing import Optional
-import io
-import csv
+
 import matplotlib.pyplot as plt
-import random
-import string
+import matplotlib.colors as mcolors
+
 # Инициализация бота и диспетчера
 bot = Bot(token=config.TG_BOT_TOKEN)
 Disp = Dispatcher()
@@ -60,14 +57,17 @@ async def create_pie_chart(data: dict, date_str: str):
     text_content = "\n".join([f"{cat}: {time}" for cat, time in zip(categories, time_hours_minutes)])
     ax_text.text(0.1, 0.5, text_content, fontsize=12, va='center', ha='left', color='yellow')
 
-    # Создаем круговую диаграмму
-    colors = ['yellow'] * len(categories)  # Все сектора желтые
+    # Создаем градиент желтого цвета
+    num_categories = len(categories)
+    yellow_gradient = [mcolors.to_rgba('yellow', alpha=1.0 - (i * 0.1)) for i in range(num_categories)]
+
+    # Создаем круговую диаграмму с градиентом желтого цвета
     wedges, texts, autotexts = ax_pie.pie(
         time_seconds,
         labels=categories,
         autopct='%1.1f%%',
         startangle=140,
-        colors=colors,
+        colors=yellow_gradient,
         textprops={'color': 'black'}  # Белый текст для процентов
     )
 
@@ -612,7 +612,7 @@ async def stats_period_handler(message: types.Message, state: FSMContext):
         # Парсим даты из сообщения
         args = message.text.split(maxsplit=2)
         if len(args) < 3:
-            await message.answer("📌 Используйте: /stats_perид ДД.ММ.ГГГГ ДД.ММ.ГГГГ")
+            await message.answer("📌 Используйте: /stats_period ДД.ММ.ГГГГ ДД.ММ.ГГГГ")
             return
 
         start_date_str = args[1].strip()
@@ -713,6 +713,14 @@ async def stats_period_handler(message: types.Message, state: FSMContext):
 
         # Отправляем текстовую статистику
         await message.answer(response)
+
+        # Создаем и отправляем круговую диаграмму
+        if stats_dict:
+            chart_buffer = await create_pie_chart(stats_dict, f"{start_date_str} - {end_date_str}")
+            chart_buffer.seek(0)
+            await message.answer_photo(BufferedInputFile(chart_buffer.read(), filename="pie_chart.png"))
+        else:
+            await message.answer("ℹ️ Нет данных для построения диаграммы.")
 
     except Exception as e:
         await message.answer(f"⚠️ Ошибка: {str(e)}")
